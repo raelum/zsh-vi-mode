@@ -1139,7 +1139,6 @@ function zvm_vi_put_after() {
 
   # Reresh display and highlight buffer
   zvm_highlight clear
-  zvm_highlight custom $(($#head+$offset)) $(($#head+$#content+$offset))
 }
 
 # Put cutbuffer before the cursor
@@ -1182,7 +1181,6 @@ function zvm_vi_put_before() {
 
   # Reresh display and highlight buffer
   zvm_highlight clear
-  zvm_highlight custom $#head $(($#head+$#content))
 }
 
 # Delete characters of the visual selection
