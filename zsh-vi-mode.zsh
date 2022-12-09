@@ -255,6 +255,10 @@ ZVM_REPEAT_MODE=false
 ZVM_REPEAT_RESET=false
 ZVM_REPEAT_COMMANDS=($ZVM_MODE_NORMAL i)
 
+# System clipboard commands
+ZVM_SYSTEM_COPY=pbcopy
+ZVM_SYSTEM_PASTE=pbpaste
+
 ##########################################
 # Initial all default settings
 
@@ -351,6 +355,27 @@ function zvm_version() {
   echo -e "$ZVM_NAME $ZVM_VERSION"
   echo -e "\e[4m$ZVM_REPOSITORY\e[0m"
   echo -e "$ZVM_DESCRIPTION"
+}
+
+# Pass in the string selection to set cutbuffer and system clipboard with.
+# Also pass in an explicit ZVM_MODE if applicable.
+function zvm_set_cutbuffer() {
+  local selection=$1
+  # Add a newline when yanking in visual line mode
+  if [[ ${2:-$ZVM_MODE} == $ZVM_MODE_VISUAL_LINE ]]; then
+    selection=$selection$'\n'
+  fi
+  CUTBUFFER=$selection
+  printf '%s' "$selection" | $ZVM_SYSTEM_COPY
+}
+
+# Gets the current system clipboard contents and puts it in cutbuffer.
+function zvm_get_cutbuffer() {
+  # Add a . to the end of the paste output to prevent any trailing newlines
+  # from being deleted. Then strip the extra . later using %..
+  # https://unix.stackexchange.com/questions/383217
+  local paste=$($ZVM_SYSTEM_PASTE; echo .)
+  CUTBUFFER=${paste%.}
 }
 
 # The widget wrapper
@@ -665,7 +690,7 @@ function zvm_backward_kill_region() {
   done
 
   bpos=$bpos+1
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}
   BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
   CURSOR=$bpos
 }
@@ -687,7 +712,7 @@ function zvm_forward_kill_line() {
 function zvm_kill_line() {
   local ret=($(zvm_calc_selection $ZVM_MODE_VISUAL_LINE))
   local bpos=${ret[1]} epos=${ret[2]}
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}$'\n'
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}$'\n'
   BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
   CURSOR=$bpos
 }
@@ -696,7 +721,7 @@ function zvm_kill_line() {
 function zvm_kill_whole_line() {
   local ret=($(zvm_calc_selection $ZVM_MODE_VISUAL_LINE))
   local bpos=$ret[1] epos=$ret[2] cpos=$ret[3]
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}$'\n'
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}$'\n'
 
   # Adjust region range of deletion
   if (( $epos < $#BUFFER )); then
@@ -1018,10 +1043,8 @@ function zvm_calc_selection() {
 function zvm_yank() {
   local ret=($(zvm_calc_selection $1))
   local bpos=$ret[1] epos=$ret[2] cpos=$ret[3]
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}
-  if [[ ${1:-$ZVM_MODE} == $ZVM_MODE_VISUAL_LINE ]]; then
-    CUTBUFFER=${CUTBUFFER}$'\n'
-  fi
+  # $1 is the manually passed in ZVM_MODE (if any)
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))} $1
   CURSOR=$bpos MARK=$epos
 }
 
@@ -1068,6 +1091,8 @@ function zvm_vi_yank() {
 # Put cutbuffer after the cursor
 function zvm_vi_put_after() {
   local head= foot=
+  # Syncs cutbuffer with system clipboard contents
+  zvm_get_cutbuffer
   local content=${CUTBUFFER}
   local offset=1
 
@@ -1120,6 +1145,8 @@ function zvm_vi_put_after() {
 # Put cutbuffer before the cursor
 function zvm_vi_put_before() {
   local head= foot=
+  # Syncs cutbuffer with system clipboard contents
+  zvm_get_cutbuffer
   local content=${CUTBUFFER}
 
   if [[ ${content: -1} == $'\n' ]]; then
@@ -1163,7 +1190,7 @@ function zvm_vi_delete() {
   local ret=($(zvm_calc_selection))
   local bpos=$ret[1] epos=$ret[2] cpos=$ret[3]
 
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}
 
   # Check if it is visual line mode
   if [[ $ZVM_MODE == $ZVM_MODE_VISUAL_LINE ]]; then
@@ -1172,7 +1199,6 @@ function zvm_vi_delete() {
     elif (( $bpos > 0 )); then
       bpos=$bpos-1
     fi
-    CUTBUFFER=${CUTBUFFER}$'\n'
   fi
 
   BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
@@ -1186,12 +1212,7 @@ function zvm_vi_change() {
   local ret=($(zvm_calc_selection))
   local bpos=$ret[1] epos=$ret[2]
 
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}
-
-  # Check if it is visual line mode
-  if [[ $ZVM_MODE == $ZVM_MODE_VISUAL_LINE ]]; then
-    CUTBUFFER=${CUTBUFFER}$'\n'
-  fi
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}
 
   BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
   CURSOR=$bpos
@@ -1235,7 +1256,7 @@ function zvm_vi_change_eol() {
     fi
   done
 
-  CUTBUFFER=${BUFFER:$bpos:$((epos-bpos))}
+  zvm_set_cutbuffer ${BUFFER:$bpos:$((epos-bpos))}
   BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
 
   zvm_reset_repeat_commands $ZVM_MODE c 0 $#CUTBUFFER
@@ -1997,7 +2018,7 @@ function zvm_change_surround_text_object() {
   else
     ((epos++))
   fi
-  CUTBUFFER=${BUFFER:$bpos:$(($epos-$bpos))}
+  zvm_set_cutbuffer ${BUFFER:$bpos:$(($epos-$bpos))}
   case ${action:0:1} in
     c)
       BUFFER="${BUFFER:0:$bpos}${BUFFER:$epos}"
